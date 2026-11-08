@@ -91,7 +91,7 @@ try{var raw=localStorage.getItem(KEY);if(raw){var p=JSON.parse(raw);if(p&&p.item
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
 var $=function(id){return document.getElementById(id)};
 var msg=function(t){$('msg').textContent=t};
-var pending=null,stream=null,detector=null,zx=null,scanning=false,lastCode='',lastAt=0;
+var tipTimer=null,pending=null,stream=null,detector=null,zx=null,scanning=false,lastCode='',lastAt=0;
 
 function render(){
   var q=($('search')?$('search').value:'').trim().toLowerCase();
@@ -181,17 +181,26 @@ async function startScan(){
   if(scanning)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Camera is not available here. Use the barcode field instead.');return;}
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    try{var tr=stream.getVideoTracks()[0],cp=tr.getCapabilities?tr.getCapabilities():{};if(cp.focusMode&&cp.focusMode.indexOf('continuous')>-1)await tr.applyConstraints({advanced:[{focusMode:'continuous'}]});}catch(e){}
   }catch(e){msg('Camera access was blocked. Allow camera permission, or type the barcode instead.');return;}
   var v=$('vid');v.srcObject=stream;await v.play().catch(function(){});
   $('cam').style.display='block';$('scanBtn').style.display='none';$('stopBtn').style.display='block';scanning=true;msg('Point the camera at a barcode.');
   if('BarcodeDetector' in window){
     try{detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code']});}catch(e){detector=new BarcodeDetector();}
+    msg('Scanner ready (built-in). Hold the barcode 6 to 10 inches away.');
     loopNative();
   }else if(window.ZXing){
-    zx=new ZXing.BrowserMultiFormatReader();
+    var h=new Map();
+    var F=ZXing.BarcodeFormat;
+    h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.QR_CODE]);
+    h.set(ZXing.DecodeHintType.TRY_HARDER,true);
+    zx=new ZXing.BrowserMultiFormatReader(h,250);
+    msg('Scanner ready (backup mode, can be slower). Hold the barcode 6 to 10 inches away.');
     zx.decodeFromVideoElement(v,function(res){if(res&&scanning)handleCode(res.getText());});
   }else{msg('Live scanning is not supported in this browser. Use the barcode field.');}
+  clearTimeout(tipTimer);
+  tipTimer=setTimeout(function(){if(scanning&&!lastCode)msg('Nothing detected yet. Fill the frame with the barcode, keep it flat and steady, and avoid glare. You can also type the number below.');},8000);
 }
 async function loopNative(){
   var v=$('vid');
@@ -201,7 +210,7 @@ async function loopNative(){
   }
 }
 function stopScan(){
-  scanning=false;
+  scanning=false;clearTimeout(tipTimer);
   try{if(zx)zx.reset();}catch(e){}
   if(stream)stream.getTracks().forEach(function(t){t.stop()});stream=null;
   $('cam').style.display='none';$('scanBtn').style.display='block';$('stopBtn').style.display='none';
